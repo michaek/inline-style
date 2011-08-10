@@ -35,10 +35,19 @@ class InlineStyle
   def process
     nodes_with_rules.each_pair do |node, rules|
       rules = rules.sort_by{ |sel| "#{sel.specificity}%04d" % rules.index(sel) }
-
+      
+      # Initialize variables.
+      width = height = image = color = nil
+      replace = false
+      
       styles = []
       rules.each do |rule|
         next if rule.dynamic_pseudo_class
+        # Skip the rules for text replacement.
+        if rule.selector.include? 'replace-text'
+          replace = true
+          next
+        end
         rule.declarations.each do |declaration| 
           if defined = styles.assoc(declaration.first)
             styles[styles.index(defined)] = declaration # overrides defined declaration
@@ -46,6 +55,38 @@ class InlineStyle
             styles << declaration
           end
         end
+      end
+      
+      # Collect special cases for html output.
+      styles.each do |declaration|
+        case declaration.first
+        when 'width'
+          width = declaration.last.sub('px', '')
+        when 'height'
+          height = declaration.last.sub('px', '')
+        when 'background'
+          matches = declaration.last.match(/url\(['"]?(.+)['"]\)|(#[0-9a-fA-F]{3,6})/)
+          image = matches[1]
+          color = matches[2]
+        end
+
+        if node.name == 'td'
+          node['width'] = width unless width.nil?
+          node['height'] = height unless height.nil?
+          node['background'] = image unless image.nil?
+          node['bgcolor'] = color unless color.nil?
+        end
+      end
+
+      if replace
+        node['class'] = node['class'].sub('replace-text', '')
+        child = Nokogiri::XML::Node.new('img', @dom)
+        child['src'] = image unless image.nil? 
+        child['width'] = width unless width.nil?
+        child['height'] = height unless height.nil?
+        child['alt'] = node.content.strip
+        node.content = ''
+        node.children = child
       end
 
       style = styles.map{ |declaration| declaration.join(': ') }.join('; ') 
